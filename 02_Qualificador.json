@@ -1,0 +1,149 @@
+{
+  "name": "ABC Telecom — Agente Qualificador",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "Entrada do Orquestrador",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [672, 352],
+      "notes": "Recebe o texto acumulado da conversa no campo query."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "options": {
+          "systemMessage": "Voce e o Agente Qualificador de leads B2B da ABC Telecom, consultoria em telecom e TI para empresas.\n\nSUA FUNCAO\nTransformar uma conversa crua com um lead em um dossie estruturado que um consultor humano consegue ler em 30 segundos antes de ligar.\n\nO QUE EXTRAIR\n- empresa: razao social ou nome fantasia\n- contato: nome da pessoa\n- cargo: cargo dela\n- num_linhas: quantidade de linhas moveis mencionada (numero inteiro; se falarem faixa, use o limite superior)\n- operadora: operadora atual\n- necessidade: a dor real em uma frase, nao o que ele pediu literalmente\n\nREGRAS DE SCORE (0 a 100, some os pontos)\n- Volume de linhas: ate 10 = 10pts | 11 a 50 = 25pts | 51 a 200 = 35pts | acima de 200 = 45pts\n- Cargo decisor (socio, diretor, C-level, gerente de TI): +20pts\n- Dor explicita com a operadora atual (queda, suporte ruim, cobranca errada): +20pts\n- Prazo declarado (contrato vencendo, mudanca de escritorio, expansao): +15pts\n\nTEMPERATURA\n- score >= 70: quente\n- score 40 a 69: morno\n- score < 40: frio\n\nPLANO SUGERIDO — OBRIGATORIO\nVoce SEMPRE consulta a ferramenta base_conhecimento antes de responder, sem excecao, mesmo que ache que ja sabe os planos. Escolha o que melhor encaixa no volume de linhas e na necessidade. Nunca invente valores ou nomes de plano. Se a base nao cobrir o caso, escreva \"a definir com consultor\".\n\nCAMPOS AUSENTES\nSe uma informacao nao aparece na conversa, use null. Nunca preencha por suposicao.\n\nFORMATO DE SAIDA\nResponda EXCLUSIVAMENTE com um objeto JSON valido, sem markdown, sem crases, sem texto antes ou depois:\n\n{\"empresa\":\"\",\"contato\":\"\",\"cargo\":\"\",\"num_linhas\":0,\"operadora\":\"\",\"necessidade\":\"\",\"plano_sugerido\":\"\",\"score\":0,\"temperatura\":\"\",\"dossie\":\"\"}\n\nO campo dossie e um paragrafo corrido de no maximo 4 linhas escrito para o consultor: quem e a empresa, qual a dor, por que o score ficou nesse patamar e qual o gancho de abertura da ligacao."
+        }
+      },
+      "id": "3380a73a-7587-4710-ac03-3982a16d4c74",
+      "name": "Agente Qualificador",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [848, 352],
+      "notes": "Extrai dados do lead, aplica a rubrica de score e monta o dossiê. A rubrica é fixa e auditável, não fica a critério do modelo."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "8fe19ad2-a1ef-46ea-bca9-79604d97771d",
+      "name": "Modelo — Qualificador",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [768, 576],
+      "notes": "CONFIGURAR: anexar credencial. Temperatura 0.2 — extração de dados exige consistência, não criatividade."
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "base_conhecimento",
+        "toolDescription": "Consulta a base de conhecimento da ABC Telecom: planos empresariais, valores de referencia, SLA por tier e politica de portabilidade. Use sempre que precisar citar um plano ou valor.",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "1a9e337d-56a6-4c7d-96ce-52d9ae78fd41",
+      "name": "RAG Central",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [960, 576],
+      "notes": "CONFIGURAR: anexar credencial do Supabase. Impede o agente de inventar planos e preços."
+    },
+    {
+      "parameters": {},
+      "id": "1214d4bd-b014-4085-946c-3364af530ae0",
+      "name": "Embeddings — Busca",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [1104, 752],
+      "notes": "CONFIGURAR: anexar credencial. Modelo idêntico ao da ingestão."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ponto unico de parsing da saida do LLM.\n// Se o agente devolver JSON sujo (crases, markdown, texto antes/depois),\n// a limpeza acontece aqui e nao contamina o resto do fluxo.\nconst bruto = $input.first().json.output ?? '';\nconst limpo = String(bruto).replace(/```json|```/g, '').trim();\nconst inicio = limpo.indexOf('{');\nconst fim = limpo.lastIndexOf('}');\n\nlet dados;\ntry {\n  dados = JSON.parse(limpo.slice(inicio, fim + 1));\n} catch (e) {\n  dados = {\n    empresa: null, contato: null, cargo: null, num_linhas: null,\n    operadora: null, necessidade: null, plano_sugerido: null,\n    score: 0, temperatura: 'frio',\n    dossie: 'Falha ao estruturar a qualificacao. Saida bruta: ' + limpo.slice(0, 400)\n  };\n}\n\nconst n = parseInt(dados.num_linhas, 10);\ndados.num_linhas = Number.isFinite(n) ? n : null;\ndados.score = parseInt(dados.score, 10) || 0;\n\nreturn [{ json: dados }];"
+      },
+      "id": "986e1d78-7c90-410a-99ec-d8d5b9094d23",
+      "name": "Normalizar Saída",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1216, 352],
+      "notes": "Nó único de normalização. Mudanças no comportamento do modelo ficam contidas aqui, com fallback explícito em caso de JSON malformado."
+    },
+    {
+      "parameters": {
+        "tableId": "leads",
+        "dataToSend": "autoMapInputData"
+      },
+      "id": "5f72f665-4974-41e7-a5f2-20835e81c55e",
+      "name": "Gravar Lead",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1440, 352],
+      "notes": "CONFIGURAR: anexar credencial. Auto-map exige que as chaves do JSON batam com as colunas da tabela leads."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "response",
+              "value": "=Lead registrado (id {{ $json.id }}).\n\nEmpresa: {{ $json.empresa }}\nContato: {{ $json.contato }} — {{ $json.cargo }}\nLinhas: {{ $json.num_linhas }} | Operadora atual: {{ $json.operadora }}\nNecessidade: {{ $json.necessidade }}\nPlano sugerido: {{ $json.plano_sugerido }}\nScore: {{ $json.score }}/100 ({{ $json.temperatura }})\n\nDossiê: {{ $json.dossie }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "988afcd8-b1ea-42e5-9707-1032bd389062",
+      "name": "Resposta ao Orquestrador",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1664, 352],
+      "notes": "O orquestrador lê o campo 'response' do último nó."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Entrada do Orquestrador": {
+      "main": [[{ "node": "Agente Qualificador", "type": "main", "index": 0 }]]
+    },
+    "Agente Qualificador": {
+      "main": [[{ "node": "Normalizar Saída", "type": "main", "index": 0 }]]
+    },
+    "Modelo — Qualificador": {
+      "ai_languageModel": [[{ "node": "Agente Qualificador", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "RAG Central": {
+      "ai_tool": [[{ "node": "Agente Qualificador", "type": "ai_tool", "index": 0 }]]
+    },
+    "Embeddings — Busca": {
+      "ai_embedding": [[{ "node": "RAG Central", "type": "ai_embedding", "index": 0 }]]
+    },
+    "Normalizar Saída": {
+      "main": [[{ "node": "Gravar Lead", "type": "main", "index": 0 }]]
+    },
+    "Gravar Lead": {
+      "main": [[{ "node": "Resposta ao Orquestrador", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

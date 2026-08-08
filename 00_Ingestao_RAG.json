@@ -1,0 +1,126 @@
+{
+  "name": "ABC Telecom — Ingestão do RAG",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Ingestão da base de conhecimento\n\nRode este workflow uma vez, antes de usar os agentes.\n\nAntes de executar:\n\n1. Google Drive → anexar credencial e selecionar o documento da base de conhecimento (use o arquivo docs/base_conhecimento_ficticia.md deste repositório)\n2. Supabase Vector Store → anexar credencial com service_role\n3. Embeddings → anexar credencial do Google Gemini\n\nO modelo de embedding escolhido aqui define a dimensionalidade da coluna vector na tabela documents. Se trocar de modelo depois, é obrigatório reingerir tudo — espaços vetoriais de modelos diferentes não são comparáveis.\n\nValidação após a execução:\nselect count(*), vector_dims(embedding) from documents group by 2;",
+        "height": 320,
+        "width": 520
+      },
+      "id": "eaa6e075-fc4d-4bb9-9367-50b73670b368",
+      "name": "Instruções",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-64, -96]
+    },
+    {
+      "parameters": {},
+      "id": "bb885fa2-6efb-4493-87c6-46c248b02cff",
+      "name": "Executar Ingestão",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-432, 384],
+      "notes": "Ingestão é operação pontual, não recorrente. Trigger manual é deliberado."
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "text/plain"
+            }
+          }
+        }
+      },
+      "id": "f6cc08cc-962b-44d8-95ff-290fb2308630",
+      "name": "Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-208, 384],
+      "notes": "CONFIGURAR: anexar credencial e selecionar o documento da base de conhecimento."
+    },
+    {
+      "parameters": {
+        "dataType": "binary",
+        "loader": "textLoader",
+        "options": {}
+      },
+      "id": "2bbb1928-2139-494e-8b26-43d721218621",
+      "name": "Default Data Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [152, 408]
+    },
+    {
+      "parameters": {
+        "chunkSize": 500,
+        "chunkOverlap": 50,
+        "options": {}
+      },
+      "id": "6ffcb5f5-c205-45a4-9c2e-d0a45a3e210c",
+      "name": "Recursive Character Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [232, 616],
+      "notes": "Chunk 500 com overlap 50. Base pequena e densa: chunks maiores diluiriam o retrieval, menores separariam plano do respectivo preço."
+    },
+    {
+      "parameters": {},
+      "id": "876d5758-276a-421c-82ec-ac71c53f71b4",
+      "name": "Embeddings — Ingestão",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [24, 408],
+      "notes": "CONFIGURAR: anexar credencial. Este é o modelo de referência — todos os nós de busca precisam usar exatamente o mesmo."
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "61a63299-6693-4c02-a609-7ed400e1a834",
+      "name": "Supabase Vector Store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1,
+      "position": [48, 176],
+      "notes": "CONFIGURAR: anexar credencial com service_role. Tabelas criadas via SQL Editor não recebem grant automático."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Executar Ingestão": {
+      "main": [[{ "node": "Google Drive", "type": "main", "index": 0 }]]
+    },
+    "Google Drive": {
+      "main": [[{ "node": "Supabase Vector Store", "type": "main", "index": 0 }]]
+    },
+    "Recursive Character Text Splitter": {
+      "ai_textSplitter": [[{ "node": "Default Data Loader", "type": "ai_textSplitter", "index": 0 }]]
+    },
+    "Default Data Loader": {
+      "ai_document": [[{ "node": "Supabase Vector Store", "type": "ai_document", "index": 0 }]]
+    },
+    "Embeddings — Ingestão": {
+      "ai_embedding": [[{ "node": "Supabase Vector Store", "type": "ai_embedding", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

@@ -1,0 +1,149 @@
+{
+  "name": "ABC Telecom — Agente de Priorização SLA",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "Entrada do Orquestrador",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [640, 128],
+      "notes": "Recebe o relato do chamado no campo query."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "options": {
+          "systemMessage": "Voce e o Agente de Priorizacao de Suporte da ABC Telecom. Classifica chamados de clientes empresariais e define o SLA aplicavel.\n\nSUA FUNCAO\nLer o relato do cliente, classificar categoria e urgencia, definir o SLA e dizer para onde o chamado vai.\n\nCATEGORIA (escolha uma)\n- tecnico: falha de servico, sinal, internet, equipamento\n- comercial: mudanca de plano, novas linhas, renegociacao\n- faturamento: cobranca indevida, segunda via, contestacao\n- portabilidade: qualquer coisa ligada a migracao de linhas\n\nURGENCIA — criterio de impacto, nao de tom do cliente\n- critica: operacao parada, todas as linhas fora, cliente sem comunicacao nenhuma\n- alta: parte relevante das linhas afetada, ou cliente Platinum com qualquer falha tecnica\n- media: degradacao de servico, uma ou poucas linhas, ha contorno possivel\n- baixa: duvida, solicitacao administrativa, nada quebrado\n\nCliente irritado nao eleva urgencia. Impacto operacional eleva. Registre a irritacao no campo descricao, nao na classificacao.\n\nTIER E SLA\nConsulte base_conhecimento para o SLA vigente de cada tier. Nunca invente o numero de horas. Se o tier do cliente nao foi informado, marque tier_cliente como null e use o SLA do tier mais basico, sinalizando isso na descricao.\n\nENCAMINHAMENTO\nCampo encaminhar: para qual time o chamado vai (suporte tecnico N1, suporte tecnico N2, consultor comercial, financeiro, mesa de portabilidade). Chamado critico ou cliente Platinum sempre pula N1 e vai direto para N2 ou consultor dedicado.\n\nFORMATO DE SAIDA\nResponda EXCLUSIVAMENTE com um objeto JSON valido, sem markdown, sem crases, sem texto antes ou depois:\n\n{\"cliente\":\"\",\"categoria\":\"\",\"urgencia\":\"\",\"sla_horas\":0,\"tier_cliente\":\"\",\"descricao\":\"\",\"encaminhar\":\"\"}\n\nO campo descricao e o relato reescrito de forma objetiva em no maximo 3 linhas, do jeito que o tecnico precisa ler."
+        }
+      },
+      "id": "510e10d2-704e-4267-9604-a3a4a815bacc",
+      "name": "Agente SLA",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [864, 128],
+      "notes": "Classifica por impacto operacional, não por tom do cliente. Decisão deliberada: cliente irritado não escala prioridade, operação parada escala."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "1c55449b-75d2-494e-9b0d-ed1a4a8c3fd6",
+      "name": "Modelo — SLA",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [784, 352],
+      "notes": "CONFIGURAR: anexar credencial. Temperatura 0.1 — classificação precisa ser reproduzível entre execuções idênticas."
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "base_conhecimento",
+        "toolDescription": "SLA por tier de cliente, planos empresariais e politicas da ABC Telecom. Consulte para determinar o prazo de resposta aplicavel.",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "d9eac843-e242-403e-9717-7331997461eb",
+      "name": "RAG Central",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [992, 352],
+      "notes": "CONFIGURAR: anexar credencial do Supabase."
+    },
+    {
+      "parameters": {},
+      "id": "ca59547b-e978-4177-b3d9-73e6e08d6cd5",
+      "name": "Embeddings — Busca",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [1136, 528],
+      "notes": "CONFIGURAR: anexar credencial. Modelo idêntico ao da ingestão."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mesma estrategia do Qualificador: ponto unico de parsing.\nconst bruto = $input.first().json.output ?? '';\nconst limpo = String(bruto).replace(/```json|```/g, '').trim();\nconst inicio = limpo.indexOf('{');\nconst fim = limpo.lastIndexOf('}');\n\nlet dados;\ntry {\n  dados = JSON.parse(limpo.slice(inicio, fim + 1));\n} catch (e) {\n  dados = {\n    cliente: null, categoria: 'tecnico', urgencia: 'media',\n    sla_horas: 24, tier_cliente: null,\n    descricao: 'Falha ao estruturar o chamado. Saida bruta: ' + limpo.slice(0, 400),\n    encaminhar: 'suporte tecnico N1'\n  };\n}\n\ndados.sla_horas = parseInt(dados.sla_horas, 10) || null;\n\nreturn [{ json: dados }];"
+      },
+      "id": "67d74d4b-ad66-4c07-a82b-65c8b967f2d7",
+      "name": "Normalizar Saída",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1248, 128],
+      "notes": "Nó único de normalização, com fallback conservador: em caso de falha, o chamado entra como técnico/média em N1 em vez de se perder."
+    },
+    {
+      "parameters": {
+        "tableId": "chamados",
+        "dataToSend": "autoMapInputData"
+      },
+      "id": "9b243fc1-d6a6-4929-888a-0a6b974924a1",
+      "name": "Gravar Chamado",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1472, 128],
+      "notes": "CONFIGURAR: anexar credencial. Auto-map exige que as chaves do JSON batam com as colunas da tabela chamados."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "response",
+              "value": "=Chamado aberto (id {{ $json.id }}).\n\nCliente: {{ $json.cliente }} | Tier: {{ $json.tier_cliente }}\nCategoria: {{ $json.categoria }}\nUrgência: {{ $json.urgencia }}\nSLA de resposta: {{ $json.sla_horas }}h\nEncaminhado para: {{ $json.encaminhar }}\n\n{{ $json.descricao }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7e955cfc-22ad-402f-8221-6b7f952253d8",
+      "name": "Resposta ao Orquestrador",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1696, 128],
+      "notes": "O orquestrador lê o campo 'response' do último nó."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Entrada do Orquestrador": {
+      "main": [[{ "node": "Agente SLA", "type": "main", "index": 0 }]]
+    },
+    "Agente SLA": {
+      "main": [[{ "node": "Normalizar Saída", "type": "main", "index": 0 }]]
+    },
+    "Modelo — SLA": {
+      "ai_languageModel": [[{ "node": "Agente SLA", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "RAG Central": {
+      "ai_tool": [[{ "node": "Agente SLA", "type": "ai_tool", "index": 0 }]]
+    },
+    "Embeddings — Busca": {
+      "ai_embedding": [[{ "node": "RAG Central", "type": "ai_embedding", "index": 0 }]]
+    },
+    "Normalizar Saída": {
+      "main": [[{ "node": "Gravar Chamado", "type": "main", "index": 0 }]]
+    },
+    "Gravar Chamado": {
+      "main": [[{ "node": "Resposta ao Orquestrador", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

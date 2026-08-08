@@ -1,0 +1,120 @@
+{
+  "name": "ABC Telecom — Agente de Portabilidade",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "Entrada do Orquestrador",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [608, 352],
+      "notes": "Recebe a dúvida de portabilidade no campo query."
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.query }}",
+        "options": {
+          "systemMessage": "Voce e o Agente de Portabilidade da ABC Telecom. Guia empresas que estao migrando suas linhas de outra operadora para a operadora parceira atraves da ABC.\n\nSUA FUNCAO\nConduzir o cliente pelo processo de portabilidade com clareza, na ordem correta, sem pular etapa e sem assustar.\n\nREGRA INEGOCIAVEL\nPrazos, documentos exigidos, janelas de migracao e condicoes vem EXCLUSIVAMENTE da ferramenta base_conhecimento. Voce nunca cita um prazo ou documento de memoria. Se a base nao cobre a pergunta, diga com todas as letras que aquele ponto precisa de confirmacao do consultor e ofereca encaminhar.\n\nCOMO RESPONDER\n- Identifique em que etapa do processo o cliente esta antes de responder. Se nao der para saber, pergunte.\n- Responda a etapa atual e antecipe a proxima. Nunca despeje o processo inteiro de uma vez.\n- Maximo de 5 passos por resposta.\n- Portugues do Brasil, tom direto e profissional. Sem jargao tecnico de telecom sem explicar.\n\nPONTOS DE ATENCAO QUE VOCE SEMPRE LEVANTA QUANDO RELEVANTES\n- Contas em atraso na operadora atual bloqueiam a portabilidade.\n- A titularidade do CNPJ na operadora de origem precisa bater com a do contrato novo.\n- Linhas em periodo de fidelidade podem gerar multa rescisoria da operadora de origem — a ABC nao controla esse custo.\n- A numeracao e preservada; o cliente nao perde os numeros.\n\nESCALONAMENTO\nEncaminhe para consultor humano quando: houver disputa de titularidade, mais de 50 linhas envolvidas, contestacao de multa, ou qualquer pedido que exija decisao comercial.\n\nNunca prometa data exata de conclusao. Trabalhe com as janelas que constam na base."
+        }
+      },
+      "id": "ac33b2c2-7f63-4190-8c33-7721f33ba5c3",
+      "name": "Agente Portabilidade",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [816, 352],
+      "notes": "Guia o processo passo a passo, ancorado na política oficial via RAG. Único agente sem escrita em banco — sua saída é orientação, não registro."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "ccda7115-1628-4589-b1e1-33ba84aad6d7",
+      "name": "Modelo — Portabilidade",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [736, 576],
+      "notes": "CONFIGURAR: anexar credencial. Temperatura 0.3 — condução de processo com alguma fluidez."
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "base_conhecimento",
+        "toolDescription": "Politica de portabilidade da ABC Telecom, documentos exigidos, prazos, janelas de migracao, planos e SLA. Fonte unica de verdade para qualquer prazo ou exigencia.",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "df8d0d8a-f7a5-4e8f-a099-3cd8ebd94396",
+      "name": "RAG Central",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [928, 576],
+      "notes": "CONFIGURAR: anexar credencial do Supabase."
+    },
+    {
+      "parameters": {},
+      "id": "5f18900a-47a4-460e-8b57-d8e49d7b556d",
+      "name": "Embeddings — Busca",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [1072, 752],
+      "notes": "CONFIGURAR: anexar credencial. Modelo idêntico ao da ingestão."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "response",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "37149e80-c482-476f-a903-0c5bf2d1f10b",
+      "name": "Resposta ao Orquestrador",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1088, 352],
+      "notes": "O orquestrador lê o campo 'response' do último nó."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Entrada do Orquestrador": {
+      "main": [[{ "node": "Agente Portabilidade", "type": "main", "index": 0 }]]
+    },
+    "Agente Portabilidade": {
+      "main": [[{ "node": "Resposta ao Orquestrador", "type": "main", "index": 0 }]]
+    },
+    "Modelo — Portabilidade": {
+      "ai_languageModel": [[{ "node": "Agente Portabilidade", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "RAG Central": {
+      "ai_tool": [[{ "node": "Agente Portabilidade", "type": "ai_tool", "index": 0 }]]
+    },
+    "Embeddings — Busca": {
+      "ai_embedding": [[{ "node": "RAG Central", "type": "ai_embedding", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

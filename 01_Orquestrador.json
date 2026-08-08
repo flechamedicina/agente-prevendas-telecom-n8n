@@ -1,0 +1,179 @@
+{
+  "name": "ABC Telecom — Orquestrador de Atendimento B2B",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {
+          "title": "ABC Telecom — Atendimento Empresarial",
+          "subtitle": "Pré-vendas, portabilidade e suporte",
+          "initialMessages": "Olá! Sou o assistente empresarial da ABC Telecom. Posso qualificar uma nova oportunidade, orientar uma portabilidade ou registrar um chamado de suporte. Como posso ajudar?"
+        }
+      },
+      "id": "3972fd15-fa27-4505-bfa4-2b92818821f6",
+      "name": "Chat",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [-432, 1024],
+      "notes": "Interface de teste nativa do n8n. Em produção, este é o único nó que muda para integrar WhatsApp Business."
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Voce e o orquestrador do atendimento empresarial da ABC Telecom, consultoria B2B em telecom e TI para empresas.\n\nSUA FUNCAO\nVoce NAO resolve os casos. Voce entende o que a pessoa precisa e aciona o especialista certo. Sua responsabilidade e o roteamento e a continuidade da conversa.\n\nESPECIALISTAS DISPONIVEIS\n\n1. qualificar_lead\nUse quando aparecer uma oportunidade comercial nova: alguem apresentando a empresa, pedindo proposta, perguntando preco, mencionando quantidade de linhas ou querendo trocar de operadora.\nAntes de acionar, garanta que a conversa contem no minimo: nome da empresa, quantidade aproximada de linhas e a necessidade. Se faltar algum, pergunte primeiro. Nunca acione com dados pela metade.\nPasse no parametro query o texto acumulado da conversa com o lead, nao apenas a ultima frase.\n\n2. guiar_portabilidade\nUse quando a pessoa ja e ou ja decidiu ser cliente e pergunta sobre migrar linhas de outra operadora: prazos, documentos, o que acontece com os numeros, etapas do processo.\nPasse no parametro query a duvida especifica junto com o contexto ja coletado.\n\n3. classificar_chamado\nUse quando um cliente existente relata um problema: falha de servico, cobranca, solicitacao de suporte. Tambem quando pedem status ou abertura de chamado.\nPasse no parametro query o relato completo do problema, incluindo o nome do cliente e o tier se ja tiverem aparecido.\n\n4. base_conhecimento\nUse para perguntas informativas diretas que nao exigem especialista: o que e um plano, o que a empresa faz, duvida pontual sobre cobertura.\n\nREGRAS DE ROTEAMENTO\n- Um especialista por vez. Se o caso tem duas frentes, resolva a mais urgente e ofereca a segunda em seguida.\n- Duvida entre qualificar_lead e classificar_chamado: se a empresa ja e cliente, e chamado. Se esta avaliando contratar, e lead.\n- Portabilidade sempre vai para guiar_portabilidade, mesmo que tenha vindo dentro de uma conversa comercial.\n- Nunca invente plano, preco, prazo ou SLA por conta propria. Esses numeros so saem de especialista ou da base.\n\nCOMO FALAR\nPortugues do Brasil, direto e profissional, sem formalidade excessiva. Voce representa uma consultoria B2B, nao um chatbot de varejo.\nQuando um especialista devolver o resultado, repasse o conteudo relevante ao cliente com suas palavras. Nunca mencione que existem agentes, ferramentas, workflows ou sistemas por tras. Para o cliente, ele esta falando com a ABC Telecom.\nNao repita informacao que a pessoa ja te deu.\n\nENCERRAMENTO\nApos concluir um atendimento, pergunte se ha mais alguma coisa antes de encerrar."
+        }
+      },
+      "id": "cde88b0a-65dd-4848-b747-7dfab97dba1a",
+      "name": "Orquestrador",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [48, 1024],
+      "notes": "Camada de roteamento. Não resolve casos: decide qual especialista atende e mantém a continuidade da conversa."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "a842cc29-73fd-4b81-827b-1c0708aa66dd",
+      "name": "Modelo — Orquestrador",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [-200, 1256],
+      "notes": "CONFIGURAR: anexar credencial do Google Gemini. Temperatura 0.4 — condução de conversa pede alguma naturalidade."
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 12
+      },
+      "id": "3972468d-a44e-4249-abfa-98212d16ec0f",
+      "name": "Memória da Conversa",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [-72, 1256],
+      "notes": "12 turnos. Suficiente para a coleta progressiva de dados do lead sem estourar contexto."
+    },
+    {
+      "parameters": {
+        "name": "qualificar_lead",
+        "description": "Qualifica uma oportunidade comercial nova. Extrai dados da empresa, aplica a rubrica de score, sugere plano e grava o lead. Envie no parametro query o texto acumulado da conversa com o lead.",
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "specifyInputSchema": true,
+        "jsonSchemaExample": "{\n  \"query\": \"Texto acumulado da conversa com o lead\"\n}"
+      },
+      "id": "d477421f-6ca7-4f75-9605-a593cd66e284",
+      "name": "Tool Qualificador",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.3,
+      "position": [56, 1256],
+      "notes": "CONFIGURAR: selecionar o workflow 02_Qualificador na lista. O sub-workflow precisa estar publicado."
+    },
+    {
+      "parameters": {
+        "name": "guiar_portabilidade",
+        "description": "Orienta o cliente no processo de portabilidade de linhas de outra operadora: etapas, documentos, prazos e pontos de atencao. Envie no parametro query a duvida com o contexto ja coletado.",
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "specifyInputSchema": true,
+        "jsonSchemaExample": "{\n  \"query\": \"Duvida de portabilidade com o contexto da conversa\"\n}"
+      },
+      "id": "22426bac-2355-448c-9fa6-be0da2e20d5d",
+      "name": "Tool Portabilidade",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.3,
+      "position": [184, 1256],
+      "notes": "CONFIGURAR: selecionar o workflow 03_Portabilidade na lista."
+    },
+    {
+      "parameters": {
+        "name": "classificar_chamado",
+        "description": "Classifica um chamado de suporte por categoria e urgencia, define o SLA aplicavel, encaminha ao time correto e registra o chamado. Envie no parametro query o relato completo do problema.",
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "specifyInputSchema": true,
+        "jsonSchemaExample": "{\n  \"query\": \"Relato completo do problema, com cliente e tier se conhecidos\"\n}"
+      },
+      "id": "2c5c8d34-b28c-4e18-9c86-a2577a3e2f36",
+      "name": "Tool SLA",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.3,
+      "position": [312, 1256],
+      "notes": "CONFIGURAR: selecionar o workflow 04_SLA na lista."
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolName": "base_conhecimento",
+        "toolDescription": "Base de conhecimento da ABC Telecom: planos empresariais, valores, SLA por tier, politica de portabilidade e informacoes institucionais. Use para perguntas informativas diretas.",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "id": "bc057d1c-927c-4470-90cc-9d9f8a20f511",
+      "name": "RAG Central",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.1,
+      "position": [440, 1256],
+      "notes": "CONFIGURAR: anexar credencial do Supabase. Mesma base consultada pelos três especialistas — fonte única de verdade."
+    },
+    {
+      "parameters": {},
+      "id": "d44672ab-1c8a-482a-af41-80d509b51c63",
+      "name": "Embeddings — Busca",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [520, 1464],
+      "notes": "CONFIGURAR: anexar credencial. O modelo precisa ser idêntico ao usado na ingestão — modelos diferentes geram espaços vetoriais incompatíveis e o retrieval falha silenciosamente."
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chat": {
+      "main": [[{ "node": "Orquestrador", "type": "main", "index": 0 }]]
+    },
+    "Modelo — Orquestrador": {
+      "ai_languageModel": [[{ "node": "Orquestrador", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Memória da Conversa": {
+      "ai_memory": [[{ "node": "Orquestrador", "type": "ai_memory", "index": 0 }]]
+    },
+    "Tool Qualificador": {
+      "ai_tool": [[{ "node": "Orquestrador", "type": "ai_tool", "index": 0 }]]
+    },
+    "Tool Portabilidade": {
+      "ai_tool": [[{ "node": "Orquestrador", "type": "ai_tool", "index": 0 }]]
+    },
+    "Tool SLA": {
+      "ai_tool": [[{ "node": "Orquestrador", "type": "ai_tool", "index": 0 }]]
+    },
+    "RAG Central": {
+      "ai_tool": [[{ "node": "Orquestrador", "type": "ai_tool", "index": 0 }]]
+    },
+    "Embeddings — Busca": {
+      "ai_embedding": [[{ "node": "RAG Central", "type": "ai_embedding", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
